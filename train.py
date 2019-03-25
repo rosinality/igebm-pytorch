@@ -111,23 +111,24 @@ def train(model, alpha=1, step_size=10, sample_step=60, device='cuda'):
     for i, (pos_img, pos_id) in loader:
         pos_img, pos_id = pos_img.to(device), pos_id.to(device)
 
-        neg_img, _ = sample_buffer(buffer, pos_img.shape[0])
+        neg_img, neg_id = sample_buffer(buffer, pos_img.shape[0])
         neg_img.requires_grad = True
 
         requires_grad(parameters, False)
         model.eval()
 
         for k in tqdm(range(sample_step)):
-            neg_out = model(neg_img, pos_id)
-            neg_out.sum().backward()
-            neg_img.grad.data.clamp_(-0.01, 0.01)
-
             if noise.shape[0] != neg_img.shape[0]:
                 noise = torch.randn(neg_img.shape[0], 3, 32, 32, device=device)
 
             noise.normal_(0, 0.005)
-            neg_img.data.add_(-step_size, neg_img.grad.data)
             neg_img.data.add_(noise.data)
+
+            neg_out = model(neg_img, neg_id)
+            neg_out.sum().backward()
+            neg_img.grad.data.clamp_(-0.01, 0.01)
+
+            neg_img.data.add_(-step_size, neg_img.grad.data)
 
             neg_img.grad.detach_()
             neg_img.grad.zero_()
@@ -142,7 +143,7 @@ def train(model, alpha=1, step_size=10, sample_step=60, device='cuda'):
         model.zero_grad()
 
         pos_out = model(pos_img, pos_id)
-        neg_out = model(neg_img, pos_id)
+        neg_out = model(neg_img, neg_id)
 
         loss = alpha * (pos_out ** 2 + neg_out ** 2)
         loss = loss + (pos_out - neg_out)
@@ -153,7 +154,7 @@ def train(model, alpha=1, step_size=10, sample_step=60, device='cuda'):
 
         optimizer.step()
 
-        buffer.push(neg_img, pos_id)
+        buffer.push(neg_img, neg_id)
 
         loader.set_description(f'loss: {loss.item():.5f}')
 
